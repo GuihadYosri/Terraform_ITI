@@ -1,0 +1,189 @@
+############################### VPC ####################################
+resource "aws_vpc" "day1_vpc" {
+  cidr_block = var.vpc_cidr
+  enable_dns_support = true
+  enable_dns_hostnames = true
+  tags = {
+    Name = "Day1VPC"
+  }
+}
+#######################################################################
+
+###################### NATGW and IGW ##################################
+resource "aws_internet_gateway" "day1_igw" {
+  vpc_id = aws_vpc.day1_vpc.id
+  tags = {
+    Name = "Day1IGW"
+  }
+}
+
+
+resource "aws_eip" "nat_eip" {
+  domain = "vpc" 
+  tags = {
+    Name = "NATEIP"
+  }
+}
+resource "aws_nat_gateway" "nat_gateway" {
+  subnet_id  = aws_subnet.subnets["public1"].id 
+  allocation_id = aws_eip.nat_eip.allocation_id
+  tags = {
+    Name = "NATGateway"
+  }
+}
+
+########################################################################
+
+####################### Subnets ########################################
+
+resource "aws_subnet" "subnets" {
+for_each = { for subnet in var.subnets_details : subnet.name => subnet }
+  vpc_id            = aws_vpc.day1_vpc.id
+  cidr_block        = each.value.cidr
+  availability_zone = "${var.region}a"
+  tags = {
+    Name = "${each.value.name}_subnet"
+  }
+
+}
+
+#######################################################################
+
+####################### Route Tables ##################################
+
+resource "aws_route_table" "route_tables" {
+  count=2
+  vpc_id = aws_vpc.day1_vpc.id
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = count.index == 0? aws_internet_gateway.day1_igw.id:aws_nat_gateway.nat_gateway.id
+  }
+}
+
+resource "aws_route_table_association" "public_rt_associate" {
+  subnet_id      = aws_subnet.subnets["public1"].id
+  route_table_id = aws_route_table.route_tables[0].id
+}
+
+
+resource "aws_route_table_association" "private_rt_associate" {
+  subnet_id      = aws_subnet.subnets["private1"].id
+  route_table_id = aws_route_table.route_tables[1].id
+}
+
+
+
+
+
+#########################################################################
+
+
+
+
+####################### Security Groups #################################
+
+resource "aws_security_group" "bastion_sg" {
+  vpc_id = aws_vpc.day1_vpc.id
+  name   = "BastionSG"
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]  
+  }
+
+  egress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.day1_vpc.cidr_block]  
+  }
+
+  tags = {
+    Name = "BastionSG"
+  }
+}
+
+
+resource "aws_security_group" "app_sg" {
+  vpc_id = aws_vpc.day1_vpc.id
+  name   = "AppSG"
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.day1_vpc.cidr_block]  
+  }
+
+  ingress {
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.day1_vpc.cidr_block] 
+  }
+
+  tags = {
+    Name = "AppSG"
+  }
+}
+
+
+#########################################################################
+
+################## Keys #################################################
+# Generate a private key using the TLS provider
+resource "tls_private_key" "rsa-key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+
+resource "aws_key_pair" "tf-key-pair" {
+  key_name   = "tf-key-pair"
+  public_key = tls_private_key.rsa-key.public_key_openssh
+}
+
+resource "local_file" "tf-key"{
+  content = tls_private_key.rsa-key.private_key_pem
+  filename  =  "tf-key-pair.pem"
+}
+
+##########################################################################
+
+################## Instances #############################################
+resource "aws_instance" "bastion" {
+  ami                    = var.machine_details["ami"] 
+  instance_type          = var.machine_details["type"]
+  subnet_id              = aws_subnet.subnets["public1"].id 
+  key_name               = aws_key_pair.tf-key-pair.id
+  vpc_security_group_ids = [aws_security_group.bastion_sg.id]
+
+  user_data = <<-EOF
+              #!/bin/bash
+               mkdir -p /home/ec2-user/.ssh
+               echo '${tls_private_key.rsa-key.private_key_pem}' > /home/ec2-user/tf-key-pair.pem
+               chmod 400 /home/ec2-user/tf-key-pair.pem
+               chown ec2-user:ec2-user /home/ec2-user/tf-key-pair.pem
+              EOF
+
+  tags = {
+    Name = "Bastion"
+  }
+}
+
+
+
+
+resource "aws_instance" "application" {
+  ami           = var.machine_details["ami"] 
+  instance_type = var.machine_details["type"]
+  subnet_id     = aws_subnet.subnets["private1"].id
+  security_groups = [aws_security_group.app_sg.id]
+  key_name      = aws_key_pair.tf-key-pair.id 
+
+  tags = {
+    Name = "Application"
+  }
+}
+
