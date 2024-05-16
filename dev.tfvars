@@ -4,7 +4,7 @@ region="us-east-1"
 machine_details={
     name="bastion",
     type="t2.micro",
-    ami="ami-04e5276ebb8451442",
+    ami="ami-04b70fa74e45c3917",
     public_ip=true
 }
 
