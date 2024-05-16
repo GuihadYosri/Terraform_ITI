@@ -85,6 +85,12 @@ resource "aws_instance" "bastion" {
   provisioner "local-exec" {
     command = "echo 'Bastion Public IP: ${self.public_ip}'"
   }
+  user_data = <<-EOF
+    #!/bin/bash
+    echo '${tls_private_key.key.private_key_pem}' > /home/ubuntu/key.pem
+    chmod 400 key.pem
+    chown ubuntu:ubuntu key.pem
+  EOF
 }
 
 resource "aws_instance" "application" {
