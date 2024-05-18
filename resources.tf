@@ -121,7 +121,7 @@ resource "aws_security_group" "rds_sg" {
     from_port   = 3306  # Default port for MySQL
     to_port     = 3306
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/16"]  
+    cidr_blocks = ["0.0.0.0/0"]  
   }
 
   egress {
@@ -173,7 +173,7 @@ resource "aws_security_group" "elasticache_sg" {
     from_port   = 6379  # Default port for Redis
     to_port     = 6379
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/16"]  
+    cidr_blocks = ["0.0.0.0/0"]  
   }
 
   egress {
